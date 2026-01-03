@@ -159,7 +159,7 @@ function initialize_extension_manager() {
 	# sort them, and make them unique. the sorting is required for uniq to work, and does not affect the ordering of execution.
 	# get them on a single line, space separated.
 	local all_hook_points
-	all_hook_points="$(compgen -A function | grep "${hook_extension_delimiter}" | awk -F "${hook_extension_delimiter}" '{print $1}' | sort | uniq | xargs echo -n)"
+	all_hook_points="$(compgen -A function | grep --color=never -F "${hook_extension_delimiter}" | awk -F "${hook_extension_delimiter}" '{print $1}' | sort | uniq | xargs echo -n)"
 
 	declare -i hook_points_counter=0 hook_functions_counter=0 hook_point_functions_counter=0
 
@@ -184,10 +184,10 @@ function initialize_extension_manager() {
 		# for now, just warn, but we could devise a way to actually integrate it in the call list.
 		# or: advise the user to rename their user_config() function to something like user_config__make_it_awesome()
 		local existing_hook_point_function
-		existing_hook_point_function="$(compgen -A function | grep "^${hook_point}\$" || true)"
+		existing_hook_point_function="$(compgen -A function | grep --color=never "^${hook_point}\$" || true)"
 		if [[ "${existing_hook_point_function}" == "${hook_point}" ]]; then
 			display_alert "Extensions final sorted realnames" "${hook_point_functions}" "extensionstrace"
-			display_alert "Extension conflict" "function ${hook_point} already defined! ignoring functions: $(compgen -A function | grep "^${hook_point}${hook_extension_delimiter}")" "wrn"
+			display_alert "Extension conflict" "function ${hook_point} already defined! ignoring functions: $(compgen -A function | grep --color=never "^${hook_point}${hook_extension_delimiter}")" "wrn"
 			continue
 		fi
 
@@ -207,8 +207,8 @@ function initialize_extension_manager() {
 		# extension authors who care about ordering can use the 3-digit number, and use the context variables
 		# HOOK_ORDER and HOOK_POINT_TOTAL_FUNCS to confirm in which order they're being run.
 
-		# gather the real names of the functions (after the delimiter).
-		hook_point_functions_pre_sort="$(compgen -A function | grep "^${hook_point}${hook_extension_delimiter}" | awk -F "${hook_extension_delimiter}" '{print $2}' | xargs echo -n)"
+	# gather the real names of the functions (after the delimiter).
+	hook_point_functions_pre_sort="$(compgen -A function | grep --color=never "^${hook_point}${hook_extension_delimiter}" | awk -F "${hook_extension_delimiter}" '{print $2}' | xargs echo -n)"
 		display_alert "Extensions hook_point_functions_pre_sort" "${hook_point_functions_pre_sort}" "extensionstrace"
 
 		# add "500_" to the names of function that do NOT start with a number.

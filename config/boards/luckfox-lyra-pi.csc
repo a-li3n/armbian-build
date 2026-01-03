@@ -1,0 +1,13 @@
+# Rockchip RK3506B triple core 512MB SoC RMII SDIO USB2
+BOARD_NAME="Luckfox Lyra Pi"
+BOARD_VENDOR="luckfox"
+BOARDFAMILY="rockchip"
+BOOTCONFIG="luckfox-lyra-rk3506_defconfig"
+BOARD_MAINTAINER=""
+KERNEL_TARGET="vendor"
+BOOT_FDT_FILE="rk3506b-luckfox-lyra-pi.dtb"
+BOOT_SCENARIO="spl-blobs"
+IMAGE_PARTITION_TABLE="gpt"
+SERIALCON="ttyFIQ0"
+BOOT_SOC="rk3506"
+DDR_BLOB="rk35/rk3506b_ddr_750MHz_v1.06.bin"
