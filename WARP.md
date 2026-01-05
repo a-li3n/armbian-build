@@ -192,6 +192,304 @@ shellcheck compile.sh lib/*.sh
 # However, this is not enforced by the build system
 ```
 
+## Best Practices
+
+### Build Environment Setup
+
+#### Host Requirements
+- **Linux**: Native builds supported (Ubuntu/Debian recommended)
+- **macOS**: Must use Docker (automatically detected by build system)
+- **Windows**: WSL2 or Docker required
+- **Disk Space**: Minimum 50GB free, recommended 100GB+
+- **RAM**: Minimum 4GB, recommended 8GB+ for parallel builds
+- **Dependencies**: Install via `./compile.sh` which auto-installs required packages
+
+#### Initial Setup
+```bash
+git clone --depth=1 --branch=main https://github.com/armbian/build
+cd build
+./compile.sh  # First run installs dependencies
+```
+
+### Userpatches Directory Structure
+
+The `userpatches/` directory is the correct place for all customizations:
+
+```
+userpatches/
+├── customize-image.sh       # Main image customization hook (MANDATORY for package installs)
+├── config-default.conf      # Build defaults (BOARD, BRANCH, RELEASE)
+├── lib/                     # Override framework functions
+├── kernel-config/           # Custom kernel configs
+├── u-boot/                  # U-Boot patches
+├── kernel/                  # Kernel patches
+└── config/
+    └── boards/              # Custom board configs
+```
+
+### Build Commands Best Practices
+
+#### Interactive Build (Recommended for First-Time Users)
+```bash
+./compile.sh
+# Follow prompts to select board, branch, release, desktop
+```
+
+#### Non-Interactive Build (Recommended for Automation)
+```bash
+./compile.sh docker \
+    BOARD=boardname \
+    BRANCH=vendor \
+    RELEASE=bookworm \
+    BUILD_MINIMAL=no \
+    BUILD_DESKTOP=no \
+    KERNEL_CONFIGURE=no \
+    COMPRESS_OUTPUTIMAGE=sha,img
+```
+
+#### Build Parameter Guidelines
+- **Always specify**: `BOARD`, `BRANCH`, `RELEASE`
+- **Docker on macOS**: Always prefix with `docker` parameter
+- **Use config file**: Create `userpatches/config-default.conf` to avoid repeating parameters
+- **Compression**: Use `COMPRESS_OUTPUTIMAGE=sha,img` (avoid xz/gz for faster iteration)
+- **Clean builds**: Use `CLEAN_LEVEL=cache,sources` only when needed (slow)
+
+#### Development Workflow
+```bash
+# Kernel configuration
+./compile.sh BOARD=boardname BRANCH=vendor KERNEL_CONFIGURE=yes
+
+# Create patches interactively
+./compile.sh CREATE_PATCHES=yes
+
+# Build only kernel
+./compile.sh KERNEL_ONLY=yes
+
+# Clean specific artifacts
+./compile.sh CLEAN_LEVEL=make        # Clean build artifacts only
+./compile.sh CLEAN_LEVEL=debs        # Clean built packages
+./compile.sh CLEAN_LEVEL=images      # Clean output images
+./compile.sh CLEAN_LEVEL=cache       # Full cache clean (slow!)
+```
+
+### Image Customization (customize-image.sh)
+
+#### Critical Rules for customize-image.sh
+
+1. **Always use framework functions** - Never use raw chroot or apt commands:
+   ```bash
+   # CORRECT
+   chroot_sdcard_apt_get_update
+   chroot_sdcard_apt_get_install package1 package2
+   
+   # WRONG - Will fail silently or cause errors
+   chroot $SDCARD apt-get update
+   apt-get install package1
+   ```
+
+2. **Use display_alert for logging** - Makes debugging easier:
+   ```bash
+   display_alert "Installing" "application packages" "info"
+   display_alert "Configuration failed" "check logs" "err"
+   ```
+
+3. **Use $SDCARD variable** - Never hardcode paths:
+   ```bash
+   # CORRECT
+   cat <<-EOF > "${SDCARD}"/etc/myconfig
+   mkdir -p "${SDCARD}"/usr/local/bin
+   
+   # WRONG
+   cat <<-EOF > /tmp/sdcard/etc/myconfig
+   ```
+
+4. **Use case statements** for board/release-specific customizations:
+   ```bash
+   case $BOARD in
+       boardname*)
+           # Board-specific customizations
+           ;;
+   esac
+   
+   case $RELEASE in
+       bookworm|trixie)
+           # Debian-specific
+           ;;
+       jammy|noble)
+           # Ubuntu-specific
+           ;;
+   esac
+   ```
+
+5. **Always wrap main logic in Main() function**:
+   ```bash
+   Main() {
+       # Your customization logic
+   }
+   
+   Main "$@"
+   ```
+
+6. **Set proper permissions** for created files:
+   ```bash
+   chmod 600 "${SDCARD}"/etc/sensitive.conf
+   chmod +x "${SDCARD}"/usr/local/bin/script
+   ```
+
+7. **Use heredocs for multi-line files**:
+   ```bash
+   cat <<-EOF > "${SDCARD}"/etc/config
+   line1
+   line2
+   EOF
+   
+   # For scripts with variables to preserve, use quoted heredoc
+   cat <<-'EOF' > "${SDCARD}"/script.sh
+   #!/bin/bash
+   echo $VARIABLE  # This $ is literal, not expanded
+   EOF
+   ```
+
+#### Available Framework Functions in customize-image.sh
+
+- `chroot_sdcard_apt_get_update` - Update apt cache
+- `chroot_sdcard_apt_get_install <packages>` - Install packages
+- `chroot_sdcard_apt_get_remove <packages>` - Remove packages
+- `chroot_sdcard` - Execute arbitrary command in chroot
+- `display_alert <message> <submessage> <level>` - Log messages (info/wrn/err)
+- `add_apt_sources <source>` - Add custom apt sources
+- `check_if_installed <package>` - Check if package installed on host
+
+#### Common Mistakes to Avoid
+
+1. **Installing packages outside customize-image.sh** - Always use the hook
+2. **Forgetting apt-get update** - Always call `chroot_sdcard_apt_get_update` before install
+3. **Not checking return codes** - Framework functions handle errors, but check critical operations
+4. **Hardcoding paths** - Always use `${SDCARD}` variable
+5. **Creating files with wrong ownership** - Files created on host are owned by build user; chroot commands run as root
+6. **Modifying system files directly** - Use framework overlays when possible
+
+### Extensions System
+
+#### When to Use Extensions vs customize-image.sh
+- **customize-image.sh**: Image-specific customizations (packages, configs, scripts)
+- **Extensions**: Reusable features across multiple boards (e.g., Docker support, cloudimg)
+
+#### Using Existing Extensions
+```bash
+# In board config file
+enable_extension "docker-ce"
+enable_extension "grub-with-dtb"
+```
+
+#### Creating Custom Extensions
+Place in `userpatches/extensions/myextension.sh`:
+```bash
+function extension_prepare_config__myextension() {
+    # Runs during config phase
+}
+
+function post_install_kernel_debs__myextension() {
+    # Runs after kernel installation
+}
+```
+
+### Patching Best Practices
+
+#### Creating Patches
+1. Run `./compile.sh CREATE_PATCHES=yes`
+2. Build proceeds until source extraction, then pauses
+3. Modify source in the directory shown
+4. Press Enter to continue - patches auto-generated in `output/patch/`
+5. Move patches to `userpatches/kernel/<family>-<version>/` or `patch/kernel/<family>-<version>/`
+
+#### Patch Organization
+```
+userpatches/
+└── kernel/
+    └── rockchip-vendor-6.1/
+        ├── 0001-my-feature.patch
+        └── 0002-my-other-feature.patch
+```
+
+#### Patch Naming
+- Use numeric prefixes: `0001-`, `0002-`, etc.
+- Descriptive names: `0001-add-custom-dts.patch`
+- Patches applied in alphanumeric order
+
+### Board Configuration Files
+
+#### Required Variables
+```bash
+BOARD_NAME="Human Readable Name"
+BOARDFAMILY="rockchip"          # SoC family
+KERNEL_TARGET="vendor,current"  # Supported branches
+BOOT_SOC="rk3506"               # Specific SoC
+BOOTCONFIG="boardname_defconfig"
+BOOT_FDT_FILE="rockchip/boardname.dtb"
+```
+
+#### Optional but Recommended
+```bash
+MODULES="module1 module2"        # Kernel modules to load
+MODULES_BLACKLIST="badmodule"    # Modules to blacklist
+DEFAULT_CONSOLE="serial"         # or "both"
+SERIALCON="ttyS0"               # Serial console device
+```
+
+### Testing and Validation
+
+#### Pre-Deployment Checklist
+1. **Build completes without errors** - Check `output/logs/`
+2. **Image boots successfully** - Test on hardware or emulator
+3. **Packages installed** - SSH in and verify with `dpkg -l` or `which`
+4. **Services running** - Check with `systemctl status`
+5. **Hardware functions** - Test WiFi, GPIO, peripherals
+6. **Logs clean** - Check `dmesg`, `journalctl -xe`
+
+#### Debugging Build Failures
+```bash
+# Check detailed logs
+cat output/logs/log-build-*.log
+cat output/debug/output.log
+
+# Search for errors
+grep -i error output/logs/*.log
+grep -i failed output/logs/*.log
+
+# Check customization script output
+grep -A 20 "customize-image.sh" output/logs/*.log
+```
+
+### Performance Optimization
+
+#### Faster Iteration
+1. **Disable compression**: `COMPRESS_OUTPUTIMAGE=img` (no xz/gz)
+2. **Use incremental builds**: Don't use `CLEAN_LEVEL` unless needed
+3. **Build kernel separately**: `KERNEL_ONLY=yes` when only changing kernel
+4. **Cache sources**: Never clean `cache/sources/` unless necessary
+
+#### Parallel Builds
+```bash
+# Framework automatically uses available CPU cores
+# Adjust with:
+PARALLEL_BUILD=4  # Limit parallel jobs
+```
+
+### Common Issues Specific to customize-image.sh
+
+#### Issue: Packages not installed in image
+**Cause**: Using wrong function in customize-image.sh  
+**Solution**: Use `chroot_sdcard_apt_get_install` not `chroot $SDCARD apt-get install`
+
+#### Issue: Changes not applied
+**Cause**: Incremental build using old cache  
+**Solution**: `./compile.sh CLEAN_LEVEL=cache` and rebuild
+
+#### Issue: Script runs but changes missing
+**Cause**: Syntax error or incorrect variable usage  
+**Solution**: Check logs with `grep "customize-image" output/logs/*.log`
+
 ## Development Practices
 
 ### Creating Patches
